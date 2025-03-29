@@ -31,7 +31,7 @@ void ws_create_frame(ws_frame *frame, uint8_t *out_data, size_t *out_len)
 
     out_data[0] = 0x80 | frame->type;
     size_t payload_len = frame->payload_length;
-    bool mask = true;
+    bool mask = false;
     out_data[1] = (payload_len <= 0x7D ? payload_len : (payload_len <= 0xFFFF ? 0x7E : 0x7F)) | (mask ? 0x80 : 0);
 
     size_t header = 2;
