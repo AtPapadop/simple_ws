@@ -152,6 +152,24 @@ void ws_parse_frame(ws_frame *frame, uint8_t *data, size_t len)
 }
 
 /* Functions to create different types of frames */
+void ws_create_ping_frame(uint8_t *out_data, size_t *out_len)
+{
+    ws_frame frame = {.payload_length = 0, .payload = NULL, .type = WS_PING_FRAME};
+    ws_create_frame(&frame, out_data, out_len);
+}
+
+void ws_create_pong_frame(uint8_t *out_data, size_t *out_len)
+{
+    ws_frame frame = {.payload_length = 0, .payload = NULL, .type = WS_PONG_FRAME};
+    ws_create_frame(&frame, out_data, out_len);
+}
+
+void ws_create_opening_frame(uint8_t *out_data, size_t *out_len)
+{
+    ws_frame frame = {.payload_length = 0, .payload = NULL, .type = WS_OPENING_FRAME};
+    ws_create_frame(&frame, out_data, out_len);
+}
+
 void ws_create_closing_frame(uint8_t *out_data, size_t *out_len)
 {
     ws_frame frame = {.payload_length = 0, .payload = NULL, .type = WS_CLOSING_FRAME};
