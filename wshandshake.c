@@ -197,3 +197,26 @@ int ws_handshake(http_header *header, uint8_t *in_buf, size_t in_len, size_t *ou
     ws_get_handshake_header(header, in_buf, out_len);
     return 0;
 }
+
+/* Generates the WebSocket handshake header for a client */
+int ws_make_handshake(uint8_t *out_buff, size_t *out_len, const char *host, const char *key)
+{
+    int written = 0;
+
+    if (*out_len < 256)
+        return -1;
+    written = snprintf((char *)out_buff, *out_len,
+                       "GET /chat HTTP/1.1\r\n"
+                       "Host: %s\r\n"
+                       "Upgrade: websocket\r\n"
+                       "Connection: Upgrade\r\n"
+                       "Sec-WebSocket-Key: %s\r\n"
+                       "Sec-WebSocket-Version: 13\r\n"
+                       "\r\n",
+                       host, key);
+
+    if (written < 0 || written >= (int)*out_len)
+        return -1;
+    *out_len = (size_t)written;
+    return 0;
+}
