@@ -28,6 +28,10 @@
  *
  */
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #ifndef _SHA_enum_
 #define _SHA_enum_
 enum
@@ -75,4 +79,8 @@ void SHA1(
     const char *str,
     int len);
 
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* _SHA1_H_ */
