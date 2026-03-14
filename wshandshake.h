@@ -30,13 +30,13 @@ extern "C"
 
 typedef struct
 {
-    char method[4];    // HTTP method (GET)
-    char uri[128];     // Requested URI
-    char key[32];      // WebSocket key
-    uint8_t version;   // WebSocket version
-    uint8_t upgrade;   // Upgrade header flag
-    uint8_t websocket; // WebSocket flag
-    wsFrameType type;  // Frame type
+	char method[4];		 // HTTP method (GET)
+	char uri[128];		 // Requested URI
+	char key[32];			 // WebSocket key
+	uint8_t version;	 // WebSocket version
+	uint8_t upgrade;	 // Upgrade header flag
+	uint8_t websocket; // WebSocket flag
+	wsFrameType type;	 // Frame type
 } http_header_t;
 
 int ws_handshake(http_header_t *header, uint8_t *in_buf, size_t in_len, size_t *out_len);

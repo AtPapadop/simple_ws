@@ -66,6 +66,12 @@ struct ws_client
   size_t out_sent;
   size_t out_cap;
 
+  bool frag_active;
+  wsFrameType frag_type;
+  uint8_t *frag_buf;
+  size_t frag_len;
+  size_t frag_cap;
+
   uint16_t fails;
 
   void *user_data;
@@ -139,6 +145,13 @@ static void ws_client_zero(ws_client_t *client)
   client->out_buf = NULL;
   client->out_len = 0;
   client->out_sent = 0;
+  client->out_cap = 0;
+
+  client->frag_active = false;
+  client->frag_type = WS_EMPTY_FRAME;
+  client->frag_buf = NULL;
+  client->frag_len = 0;
+  client->frag_cap = 0;
 
   client->fails = 0;
   client->user_data = NULL;
@@ -162,6 +175,9 @@ static void ws_client_reset_runtime(ws_client_t *client)
   client->out_len = 0;
   client->out_sent = 0;
   client->fails = 0;
+  client->frag_active = false;
+  client->frag_type = WS_EMPTY_FRAME;
+  client->frag_len = 0;
   client->user_data = NULL;
   client->close_reason[0] = '\0';
 }
@@ -181,6 +197,11 @@ static void ws_client_free_buffers(ws_client_t *client)
   client->out_len = 0;
   client->out_sent = 0;
   client->out_cap = 0;
+
+  free(client->frag_buf);
+  client->frag_buf = NULL;
+  client->frag_len = 0;
+  client->frag_cap = 0;
 }
 
 static int ws_ensure_capacity(uint8_t **buf, size_t *cap, size_t needed, size_t initial)
@@ -572,6 +593,32 @@ static void ws_server_handle_handshake(ws_server_t *server, ws_client_t *client)
   free(leftover);
 }
 
+static void ws_client_reset_fragments(ws_client_t *client)
+{
+  if (!client)
+    return;
+
+  client->frag_active = false;
+  client->frag_type = WS_EMPTY_FRAME;
+  client->frag_len = 0;
+}
+
+static int ws_client_append_fragment(ws_client_t *client, const uint8_t *data, size_t len)
+{
+  if (!client || !client)
+    return -1;
+  
+  if (ws_ensure_capacity(&client->frag_buf, &client->frag_cap, client->frag_len + len + 1, server->initial_buffer_size) != 0)
+    return -1;
+
+  if (data && len > 0)
+    memcpy(client->frag_buf + client->frag_len, data, len);
+  
+  client->frag_len += len;
+  client->frag_buf[client->frag_len] = '\0';
+  return 0;
+}
+
 static void ws_server_handle_frames(ws_server_t *server, ws_client_t *client)
 {
   while (client->in_len > 0)
@@ -604,8 +651,60 @@ static void ws_server_handle_frames(ws_server_t *server, ws_client_t *client)
     {
     case WS_TEXT_FRAME:
     case WS_BINARY_FRAME:
-      if (server->on_message)
-        server->on_message(server, client, &frame, server->user_data);
+      if (client->frag_active)
+      {
+        ws_server_report_error(server, "Non continuation frame while fragment is active", 0);
+        ws_server_close_client_now(server, client, "Protocol Error - Unexpected new data frame during fragmentation");
+        return;
+      }
+
+      if (frame.fin)
+      {
+        if (server->on_message)
+          server->on_message(server, client, &frame, server->user_data);
+      }
+      else
+      {
+        client->frag_active = true;
+        client->frag_type = frame.type;
+        client->frag_len = 0;
+
+        if (ws_client_append_fragment(client, frame.payload, frame.payload_length) != 0)
+        {
+          ws_server_report_error(server, "append_fragment", errno);
+          ws_server_close_client_now(server, client, "Fragmentation Memory Error");
+          return;
+        }
+      }
+      break;
+    case WS_CONTINUATION_FRAME:
+      if (!client->frag_active)
+      {
+        ws_server_report_error(server, "Continuation frame while no fragment is active", 0);
+        ws_server_close_client_now(server, client, "Protocol Error - Unexpected continuation frame");
+        return;
+      }
+
+      if (ws_client_append_fragment(client, frame.payload, frame.payload_length) != 0)
+      {
+        ws_server_report_error(server, "append_fragment", errno);
+        ws_server_close_client_now(server, client, "Fragmentation Memory Error");
+        return;
+      }
+
+      if (frame.fin)
+      {
+        ws_frame_t assembled;
+        assembled.fin = true;
+        assembled.opcode = (uint8_t)client->frag_type;
+        assembled.type = client->frag_type;
+        assembled.payload = client->frag_buf;
+        assembled.payload_length = client->frag_len;
+
+        if (server->on_message)
+          server->on_message(server, client, &assembled, server->user_data);
+        ws_client_reset_fragments(client);
+      }
       break;
     case WS_PING_FRAME:
       (void)ws_server_send_immediate_frame(client, WS_PONG_FRAME, frame.payload, frame.payload_length);
