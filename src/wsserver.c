@@ -10,7 +10,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 
-#include "wsserver.h"
+#include "simple_ws/wsserver.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -19,6 +19,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <time.h>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -40,6 +41,7 @@
 #define WS_SERVER_DEFAULT_BACKLOG 128
 #define WS_SERVER_DEFAULT_BUF_SIZE 4096
 #define WS_SERVER_DEFAULT_MAX_EVENTS 64
+#define WS_SERVER_SHUTDOWN_TIMEOUT_MS 2000
 
 #define WS_TAG_FD(fd_) ((((uint64_t)(uint32_t)(fd_)) << 1) | 0ULL)
 #define WS_TAG_PTR(ptr_) ((((uint64_t)(uintptr_t)(ptr_)) << 1) | 1ULL)
@@ -95,6 +97,8 @@ struct ws_server
   bool started_as_thread;
   bool thead_joinable;
   bool running;
+  bool shutting_down;
+  struct timespec shutdown_deadline;
 
   pthread_t thead;
   pthread_mutex_t lock;
@@ -228,6 +232,29 @@ static int ws_ensure_capacity(uint8_t **buf, size_t *cap, size_t needed, size_t 
   return 0;
 }
 
+static struct timespec ws_timespec_add_ms(struct timespec base, long ms)
+{
+  base.tv_sec += ms / 1000;
+  base.tv_nsec += (ms % 1000) * 1000000L;
+  if (base.tv_nsec >= 1000000000L)
+  {
+    base.tv_sec += 1;
+    base.tv_nsec -= 1000000000L;
+  }
+  return base;
+}
+
+static bool ws_timespec_reached(const struct timespec *deadline)
+{
+  struct timespec now = {0};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  if (now.tv_sec > deadline->tv_sec)
+    return true;
+  if (now.tv_sec < deadline->tv_sec)
+    return false;
+  return now.tv_nsec >= deadline->tv_nsec;
+}
+
 static bool ws_server_is_running(ws_server_t *server)
 {
   bool running = false;
@@ -245,7 +272,19 @@ static void ws_server_set_running(ws_server_t *server, bool running)
   if (!server || server->wake_fd < 0)
     return;
 
-  (void)write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t)); // Wake up epoll_wait
+  pthread_mutex_lock(&server->lock);
+  server->running = running;
+  pthread_mutex_unlock(&server->lock);
+
+  (void)write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t));
+}
+
+static void ws_server_wake(ws_server_t *server)
+{
+  if (!server || server->wake_fd < 0)
+    return;
+
+  (void)write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t));
 }
 
 static int ws_server_mod_client_events(ws_server_t *server, ws_client_t *client, uint32_t events)
@@ -341,6 +380,28 @@ static int ws_server_send_immediate_frame(ws_client_t *client, wsFrameType type,
   return 0;
 }
 
+static void ws_server_send_close_with_reason(ws_client_t *client, uint16_t code, const char *reason)
+{
+  if (!client || client->fd < 0)
+    return;
+
+  uint8_t payload[2 + 123];
+  size_t reason_len = 0;
+  if (reason && reason[0] != '\0')
+  {
+    reason_len = strlen(reason);
+    if (reason_len > 123)
+      reason_len = 123;
+  }
+
+  uint16_t net_code = htons(code);
+  memcpy(payload, &net_code, sizeof(net_code));
+  if (reason_len > 0)
+    memcpy(payload + sizeof(net_code), reason, reason_len);
+
+  (void)ws_server_send_immediate_frame(client, WS_CLOSING_FRAME, payload, sizeof(net_code) + reason_len);
+}
+
 static int ws_server_queue_frame_locked(ws_server_t *server, ws_client_t *client, wsFrameType type, const uint8_t *payload, size_t payload_len)
 {
   if (!server || !client || client->fd < 0 || !client->active || !client->handshake_done)
@@ -372,6 +433,31 @@ static int ws_server_queue_frame_locked(ws_server_t *server, ws_client_t *client
     return -1;
 
   return 0;
+}
+
+static int ws_server_queue_close_with_reason_locked(ws_server_t *server, ws_client_t *client, uint16_t code, const char *reason)
+{
+  if (!server || !client || client->fd < 0 || !client->active || !client->handshake_done)
+    return -1;
+
+  uint8_t payload[2 + 123];
+  size_t reason_len = 0;
+  if (reason && reason[0] != '\0')
+  {
+    reason_len = strlen(reason);
+    if (reason_len > 123)
+      reason_len = 123;
+  }
+
+  uint16_t net_code = htons(code);
+  memcpy(payload, &net_code, sizeof(net_code));
+  if (reason_len > 0)
+    memcpy(payload + sizeof(net_code), reason, reason_len);
+
+  client->close_requested = true;
+  snprintf(client->close_reason, sizeof(client->close_reason), "%s", reason ? reason : "Closed");
+
+  return ws_server_queue_frame_locked(server, client, WS_CLOSING_FRAME, payload, sizeof(net_code) + reason_len);
 }
 
 static void ws_server_close_client_now(ws_server_t *server, ws_client_t *client, const char *reason)
@@ -417,16 +503,11 @@ static void ws_server_process_close_requests(ws_server_t *server)
 
   for (int i = 0; i < server->max_clients; i++)
   {
-    bool close_me = false;
-    char reason[128] = {0};
-
     pthread_mutex_lock(&server->lock);
-    if (server->clients[i].active && server->clients[i].close_requested)
-    {
-      close_me = true;
+    bool close_me = server->clients[i].active && server->clients[i].close_requested && server->clients[i].out_len == 0;
+    char reason[128] = {0};
+    if (close_me)
       snprintf(reason, sizeof(reason), "%s", server->clients[i].close_reason[0] ? server->clients[i].close_reason : "Close Requested");
-      server->clients[i].close_requested = false;
-    }
     pthread_mutex_unlock(&server->lock);
 
     if (close_me)
@@ -603,9 +684,9 @@ static void ws_client_reset_fragments(ws_client_t *client)
   client->frag_len = 0;
 }
 
-static int ws_client_append_fragment(ws_client_t *client, const uint8_t *data, size_t len)
+static int ws_client_append_fragment(ws_server_t *server, ws_client_t *client, const uint8_t *data, size_t len)
 {
-  if (!client || !client)
+  if (!client || !server)
     return -1;
   
   if (ws_ensure_capacity(&client->frag_buf, &client->frag_cap, client->frag_len + len + 1, server->initial_buffer_size) != 0)
@@ -669,7 +750,7 @@ static void ws_server_handle_frames(ws_server_t *server, ws_client_t *client)
         client->frag_type = frame.type;
         client->frag_len = 0;
 
-        if (ws_client_append_fragment(client, frame.payload, frame.payload_length) != 0)
+        if (ws_client_append_fragment(server, client, frame.payload, frame.payload_length) != 0)
         {
           ws_server_report_error(server, "append_fragment", errno);
           ws_server_close_client_now(server, client, "Fragmentation Memory Error");
@@ -685,7 +766,7 @@ static void ws_server_handle_frames(ws_server_t *server, ws_client_t *client)
         return;
       }
 
-      if (ws_client_append_fragment(client, frame.payload, frame.payload_length) != 0)
+      if (ws_client_append_fragment(server, client, frame.payload, frame.payload_length) != 0)
       {
         ws_server_report_error(server, "append_fragment", errno);
         ws_server_close_client_now(server, client, "Fragmentation Memory Error");
@@ -781,7 +862,7 @@ static void ws_server_handle_client_write(ws_server_t *server, ws_client_t *clie
 
   while (true)
   {
-    pthreads_mutex_lock(&server->lock);
+    pthread_mutex_lock(&server->lock);
 
     if (!client->active || client->fd < 0 || client->out_len == 0)
     {
@@ -976,7 +1057,7 @@ static void *ws_server_thread_main(void *arg)
 
 /* Public API Functions */
 
-ws_server_t *ws_server_create(int port, int max_clients)
+ws_server_t *ws_server_create(uint16_t port, int max_clients)
 {
   if (port <= 0 || port > 65535 || max_clients <= 0)
     return NULL;
@@ -1053,7 +1134,7 @@ int ws_server_set_bind_address(ws_server_t *server, const char *ip)
     return -1;
   }
 
-  if (inet_pton(AF_INET, ip, &(struct in_addr)){0} != 1)
+  if (inet_pton(AF_INET, ip, &(struct in_addr){0}) != 1)
   {
     pthread_mutex_unlock(&server->lock);
     return -1;
@@ -1179,6 +1260,10 @@ int ws_server_run(ws_server_t *server)
   if (ws_server_setup(server) != 0)
     return -1;
 
+  pthread_mutex_lock(&server->lock);
+  server->shutting_down = false;
+  pthread_mutex_unlock(&server->lock);
+
   ws_server_set_running(server, true);
 
   struct epoll_event *events = calloc((size_t)server->max_events, sizeof(struct epoll_event));
@@ -1235,9 +1320,35 @@ int ws_server_run(ws_server_t *server)
         if (!client->active)
           continue;
       }
+
+      if (events[i].events & EPOLLOUT)
+      {
+        ws_server_handle_client_write(server, client);
+        if (!client->active)
+          continue;
+      }
     }
 
     ws_server_process_close_requests(server);
+
+    pthread_mutex_lock(&server->lock);
+    bool shutdown = server->shutting_down;
+    bool deadline_reached = shutdown && ws_timespec_reached(&server->shutdown_deadline);
+    bool any_active = false;
+    if (shutdown)
+    {
+      for (int i = 0; i < server->max_clients; i++)
+      {
+        if (server->clients[i].active)
+        {
+          any_active = true;
+          break;
+        }
+      }
+    }
+    if (shutdown && (!any_active || deadline_reached))
+      server->running = false;
+    pthread_mutex_unlock(&server->lock);
   }
 
   free(events);
@@ -1259,6 +1370,7 @@ int ws_server_start(ws_server_t *server)
     return -1;
   }
   server->started_as_thread = true;
+  server->shutting_down = false;
   pthread_mutex_unlock(&server->lock);
 
   if (pthread_create(&server->thead, NULL, ws_server_thread_main, server) != 0)
@@ -1278,9 +1390,34 @@ int ws_server_start(ws_server_t *server)
 int ws_server_stop(ws_server_t *server)
 {
   if (!server)
-    return -1
+    return -1;
 
-        ws_server_set_running(server, false);
+  pthread_mutex_lock(&server->lock);
+  if (server->shutting_down)
+  {
+    pthread_mutex_unlock(&server->lock);
+    ws_server_wake(server);
+    return 0;
+  }
+
+  server->shutting_down = true;
+  struct timespec now = {0};
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  server->shutdown_deadline = ws_timespec_add_ms(now, WS_SERVER_SHUTDOWN_TIMEOUT_MS);
+
+  for (int i = 0; i < server->max_clients; i++)
+  {
+    ws_client_t *client = &server->clients[i];
+    if (!client->active)
+      continue;
+
+    if (client->handshake_done)
+      (void)ws_server_queue_close_with_reason_locked(server, client, 1000, "Server Shutdown");
+    else
+      client->close_requested = true;
+  }
+  pthread_mutex_unlock(&server->lock);
+
   ws_server_wake(server);
   return 0;
 }
@@ -1395,31 +1532,32 @@ int ws_server_close_client(ws_server_t *server, ws_client_t *client, const char 
   if (!server || !client)
     return -1;
 
+  int rc;
   pthread_mutex_lock(&server->lock);
   if (!client->active || client->fd < 0)
   {
     pthread_mutex_unlock(&server->lock);
     return -1;
   }
-  client->close_requested = true;
-  snprintf(client->close_reason, sizeof(client->close_reason), "%s", reason ? reason : "Close Requested");
+  rc = ws_server_queue_close_with_reason_locked(server, client, 1000, reason ? reason : "Close Requested");
   pthread_mutex_unlock(&server->lock);
 
-  ws_server_wake(server);
-  return 0;
+  if (rc == 0)
+    ws_server_wake(server);
+  return rc;
 }
 
-int ws_client_fd(ws_client_t *client)
+int ws_client_fd(const ws_client_t *client)
 {
   return client ? client->fd : -1;
 }
 
-bool ws_client_is_connected(ws_client_t *client)
+bool ws_client_is_connected(const ws_client_t *client)
 {
   return client ? client->active : false;
 }
 
-bool ws_client_handshake_done(ws_client_t *client)
+bool ws_client_handshake_done(const ws_client_t *client)
 {
   return client ? client->handshake_done : false;
 }

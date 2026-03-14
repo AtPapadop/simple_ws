@@ -14,7 +14,7 @@
 #include <string.h>
 #include <assert.h>
 
-#include "websocket.h"
+#include "simple_ws/websocket.h"
 
 #define MASK_LEN 4
 
@@ -100,6 +100,7 @@ void ws_create_frame(ws_frame_t *frame, uint8_t *out_data, size_t *out_len)
 {
 	assert(frame);
 	assert(frame->type == WS_TEXT_FRAME || frame->type == WS_BINARY_FRAME || frame->type == WS_PING_FRAME || frame->type == WS_PONG_FRAME || frame->type == WS_CLOSING_FRAME);
+	frame->fin = 1;
 	ws_create_frame_impl(frame->type, frame->fin, frame->payload, frame->payload_length, out_data, out_len);
 }
 

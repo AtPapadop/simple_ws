@@ -5,6 +5,6 @@ includedir=${prefix}/include
 
 Name: simple_ws
 Description: A simple WebSocket server library in C.
-Version: 0.1.0
+Version: @SIMPLE_WS_VERSION@
 Libs: -L${libdir} -lsimple_ws -lpthread
 Cflags: -I${includedir}

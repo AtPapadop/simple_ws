@@ -7,7 +7,7 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include "base64.h"
+#include "simple_ws/base64.h"
 
 static const char base64_table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 

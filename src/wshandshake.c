@@ -14,7 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include "wshandshake.h"
+#include "simple_ws/wshandshake.h"
 
 #ifdef _WIN32
 #define snprintf(buf, len, format, ...) _snprintf_s(buf, len, len, format, __VA_ARGS__)

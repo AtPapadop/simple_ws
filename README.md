@@ -58,6 +58,26 @@ Installed artifacts include:
 - headers in `include`
 - CMake export files in `lib/cmake/simple_ws`
 
+## Use the installed library (no -Lbuild)
+
+If you installed to `/usr/local`, compile against the installed headers and library:
+
+```bash
+cc -std=c99 -I/usr/local/include examples/echoserver.c -L/usr/local/lib -lsimple_ws -lpthread -o echoserver
+```
+
+If you built a shared library and the loader does not find it at runtime, add an rpath:
+
+```bash
+cc -std=c99 -I/usr/local/include examples/echoserver.c -L/usr/local/lib -Wl,-rpath,/usr/local/lib -lsimple_ws -lpthread -o echoserver
+```
+
+Or add `/usr/local/lib` to the dynamic linker cache (system-wide):
+
+```bash
+sudo ldconfig
+```
+
 ## Use in your project
 
 Include the umbrella header:

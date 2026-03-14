@@ -31,7 +31,7 @@ static void on_connect(ws_server_t *server, ws_client_t *client, void *user_data
 {
   (void)user_data;
 
-  char ip[INET6_ADDRSTRLEN];
+  char ip[65];
   const char *addr = ws_client_ip(client, ip, sizeof(ip));
   if (!addr)
     addr = "Unknown";
@@ -44,7 +44,7 @@ static void on_disconnect(ws_server_t *server, ws_client_t *client, const char *
   (void)server;
   (void)user_data;
 
-  char ip[INET6_ADDRSTRLEN];
+  char ip[65];
   const char *addr = ws_client_ip(client, ip, sizeof(ip));
   if (!addr)
     addr = "Unknown";
@@ -64,7 +64,7 @@ static void on_handshake_fail(ws_server_t *server, ws_client_t *client, const ch
   (void)server;
   (void)user_data;
 
-  char ip[INET6_ADDRSTRLEN];
+  char ip[65];
   const char *addr = ws_client_ip(client, ip, sizeof(ip));
   if (!addr)
     addr = "Unknown";
