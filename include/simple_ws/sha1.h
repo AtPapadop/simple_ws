@@ -14,8 +14,8 @@
  *
  */
 
-#ifndef _SHA1_H_
-#define _SHA1_H_
+#ifndef __SIMPLE_WS_SHA1_H
+#define __SIMPLE_WS_SHA1_H
 
 #include <stdint.h>
 /*
@@ -68,15 +68,42 @@ typedef struct SHA1Context
 *  Function Prototypes
 */
 
+/**
+ * @brief Initialize a SHA-1 context for a new hash computation.
+ * @param context SHA-1 context to initialize.
+ * @return shaSuccess on success, otherwise an error code.
+ */
 int SHA1Reset(SHA1Context *);
+
+/**
+ * @brief Feed input bytes into an active SHA-1 context.
+ * @param context SHA-1 context to update.
+ * @param message_array Input bytes to hash.
+ * @param length Number of bytes in message_array.
+ * @return shaSuccess on success, otherwise an error code.
+ */
 int SHA1Input(SHA1Context *, const uint8_t *, unsigned int);
+
+/**
+ * @brief Finalize hashing and write the SHA-1 digest.
+ * @param context SHA-1 context to finalize.
+ * @param Message_Digest Output buffer for the 20-byte digest.
+ * @return shaSuccess on success, otherwise an error code.
+ */
 int SHA1Result(SHA1Context *,
 								uint8_t Message_Digest[SHA1HashSize]);
 
+/**
+ * @brief Convenience helper that computes SHA-1 for a byte sequence.
+ * @param hash_out Output buffer for the 20-byte digest.
+ * @param str Input byte sequence to hash.
+ * @param len Number of bytes in str.
+ * @return No return value.
+ */
 void SHA1(uint8_t *hash_out, const char *str, int len);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* _SHA1_H_ */
+#endif /* __SIMPLE_WS_SHA1_H */

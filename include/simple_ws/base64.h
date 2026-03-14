@@ -12,15 +12,31 @@
  * See README and COPYING for more details.
  */
 
-#ifndef BASE64_H
-#define BASE64_h
+#ifndef __SIMPLE_WS_BASE64_H
+#define __SIMPLE_WS_BASE64_H
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
+/**
+ * @brief Encode binary data into Base64 text.
+ * @param src Input byte buffer to encode.
+ * @param len Number of bytes in src.
+ * @param out Output character buffer that receives encoded text.
+ * @param out_len Input: capacity of out. Output: encoded length written.
+ * @return Pointer to out on success, or NULL on failure.
+ */
 char * base64_encode(const unsigned char *src, size_t len,
                               char *out, size_t *out_len);
+
+/**
+ * @brief Decode Base64 text into binary data.
+ * @param src Input Base64 character buffer.
+ * @param len Number of bytes in src.
+ * @param out_len Output decoded byte length.
+ * @return Newly allocated decoded buffer on success, or NULL on failure.
+ */
 unsigned char * base64_decode(const unsigned char *src, size_t len,
 			      size_t *out_len);
 
@@ -28,4 +44,4 @@ unsigned char * base64_decode(const unsigned char *src, size_t len,
 }
 #endif
 
-#endif /* BASE64_H */
+#endif /* __SIMPLE_WS_BASE64_H */

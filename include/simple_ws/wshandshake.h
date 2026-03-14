@@ -10,8 +10,8 @@
  *
  */
 
-#ifndef __WS_HANDSHAKE_H
-#define __WS_HANDSHAKE_H
+#ifndef __SIMPLE_WS_WSHANDSHAKE_H
+#define __SIMPLE_WS_WSHANDSHAKE_H
 
 #ifdef __cplusplus
 extern "C"
@@ -39,11 +39,36 @@ typedef struct
 	wsFrameType type;	 // Frame type
 } http_header_t;
 
+/**
+ * @brief Parse and validate an incoming WebSocket opening handshake request.
+ * @param header Output parsed HTTP/WebSocket header fields.
+ * @param in_buf Input request bytes.
+ * @param in_len Number of bytes in in_buf.
+ * @param out_len Output number of bytes consumed/produced by the parser.
+ * @return 0 on success, non-zero on parse or validation failure.
+ */
 int ws_handshake(http_header_t *header, uint8_t *in_buf, size_t in_len, size_t *out_len);
+
+/**
+ * @brief Create a WebSocket Sec-WebSocket-Accept value from a client key.
+ * @param key Client-provided Sec-WebSocket-Key value.
+ * @param out_key Output buffer for the generated accept key.
+ * @param out_len Input: capacity of out_key. Output: key length written.
+ * @return 0 on success, non-zero on failure.
+ */
 int ws_make_accept_key(const char *key, char *out_key, size_t *out_len);
+
+/**
+ * @brief Build the HTTP 101 Switching Protocols handshake response bytes.
+ * @param out_buff Output buffer that receives the response message.
+ * @param out_len Input: capacity of out_buff. Output: bytes written.
+ * @param host Host header value to include.
+ * @param key Client Sec-WebSocket-Key used to derive accept key.
+ * @return 0 on success, non-zero on failure.
+ */
 int ws_make_handshake(uint8_t *out_buff, size_t *out_len, const char *host, const char *key);
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* __WS_HANDSHAKE_H */
+#endif /* __SIMPLE_WS_WSHANDSHAKE_H */

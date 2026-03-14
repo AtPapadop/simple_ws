@@ -1,0 +1,10 @@
+prefix=@CMAKE_INSTALL_PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: simple_ws
+Description: A simple WebSocket server library in C.
+Version: 0.1.0
+Libs: -L${libdir} -lsimple_ws -lpthread
+Cflags: -I${includedir}
