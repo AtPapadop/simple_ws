@@ -95,12 +95,12 @@ struct ws_server
   int wake_fd;
 
   bool started_as_thread;
-  bool thead_joinable;
+  bool thread_joinable;
   bool running;
   bool shutting_down;
   struct timespec shutdown_deadline;
 
-  pthread_t thead;
+  pthread_t thread;
   pthread_mutex_t lock;
 
   ws_client_t *clients;
@@ -1075,7 +1075,7 @@ ws_server_t *ws_server_create(uint16_t port, int max_clients)
   server->epoll_fd = -1;
   server->wake_fd = -1;
   server->started_as_thread = false;
-  server->thead_joinable = false;
+  server->thread_joinable = false;
   server->running = false;
 
   snprintf(server->bind_addr, sizeof(server->bind_addr), "%s", WS_SERVER_DEFAULT_BIND_ADDR);
@@ -1364,7 +1364,7 @@ int ws_server_start(ws_server_t *server)
     return -1;
 
   pthread_mutex_lock(&server->lock);
-  if (server->running || server->thead_joinable)
+  if (server->running || server->thread_joinable)
   {
     pthread_mutex_unlock(&server->lock);
     return -1;
@@ -1373,7 +1373,7 @@ int ws_server_start(ws_server_t *server)
   server->shutting_down = false;
   pthread_mutex_unlock(&server->lock);
 
-  if (pthread_create(&server->thead, NULL, ws_server_thread_main, server) != 0)
+  if (pthread_create(&server->thread, NULL, ws_server_thread_main, server) != 0)
   {
     pthread_mutex_lock(&server->lock);
     server->started_as_thread = false;
@@ -1382,7 +1382,7 @@ int ws_server_start(ws_server_t *server)
   }
 
   pthread_mutex_lock(&server->lock);
-  server->thead_joinable = true;
+  server->thread_joinable = true;
   pthread_mutex_unlock(&server->lock);
   return 0;
 }
@@ -1428,19 +1428,19 @@ int ws_server_join(ws_server_t *server)
     return -1;
 
   pthread_mutex_lock(&server->lock);
-  if (!server->started_as_thread || !server->thead_joinable)
+  if (!server->started_as_thread || !server->thread_joinable)
   {
     pthread_mutex_unlock(&server->lock);
     return -1;
   }
   pthread_mutex_unlock(&server->lock);
 
-  if (pthread_join(server->thead, NULL) != 0)
+  if (pthread_join(server->thread, NULL) != 0)
     return -1;
 
   pthread_mutex_lock(&server->lock);
   server->started_as_thread = false;
-  server->thead_joinable = false;
+  server->thread_joinable = false;
   pthread_mutex_unlock(&server->lock);
   return 0;
 }
