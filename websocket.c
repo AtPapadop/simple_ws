@@ -25,7 +25,7 @@
 #endif
 
 /* Function to create a WebSocket frame */
-void ws_create_frame(ws_frame *frame, uint8_t *out_data, size_t *out_len)
+void ws_create_frame(ws_frame_t *frame, uint8_t *out_data, size_t *out_len)
 {
     assert(frame->type);
 
@@ -71,7 +71,7 @@ void ws_create_frame(ws_frame *frame, uint8_t *out_data, size_t *out_len)
 }
 
 /* Parses the opcode and assigns frame type */
-static wsFrameType ws_parse_opcode(ws_frame *frame)
+static wsFrameType ws_parse_opcode(ws_frame_t *frame)
 {
     switch (frame->opcode)
     {
@@ -90,7 +90,7 @@ static wsFrameType ws_parse_opcode(ws_frame *frame)
 }
 
 /* Parses a WebSocket frame */
-void ws_parse_frame(ws_frame *frame, uint8_t *data, size_t len)
+void ws_parse_frame(ws_frame_t *frame, uint8_t *data, size_t len)
 {
     if (len < 2)
     {
@@ -154,36 +154,36 @@ void ws_parse_frame(ws_frame *frame, uint8_t *data, size_t len)
 /* Functions to create different types of frames */
 void ws_create_ping_frame(uint8_t *out_data, size_t *out_len)
 {
-    ws_frame frame = {.payload_length = 0, .payload = NULL, .type = WS_PING_FRAME};
+    ws_frame_t frame = {.payload_length = 0, .payload = NULL, .type = WS_PING_FRAME};
     ws_create_frame(&frame, out_data, out_len);
 }
 
 void ws_create_pong_frame(uint8_t *out_data, size_t *out_len)
 {
-    ws_frame frame = {.payload_length = 0, .payload = NULL, .type = WS_PONG_FRAME};
+    ws_frame_t frame = {.payload_length = 0, .payload = NULL, .type = WS_PONG_FRAME};
     ws_create_frame(&frame, out_data, out_len);
 }
 
 void ws_create_closing_frame(uint8_t *out_data, size_t *out_len)
 {
-    ws_frame frame = {.payload_length = 0, .payload = NULL, .type = WS_CLOSING_FRAME};
+    ws_frame_t frame = {.payload_length = 0, .payload = NULL, .type = WS_CLOSING_FRAME};
     ws_create_frame(&frame, out_data, out_len);
 }
 
 void ws_create_text_frame(const char *text, uint8_t *out_data, size_t *out_len)
 {
-    ws_frame frame = {.payload_length = strlen(text), .payload = (uint8_t *)text, .type = WS_TEXT_FRAME};
+    ws_frame_t frame = {.payload_length = strlen(text), .payload = (uint8_t *)text, .type = WS_TEXT_FRAME};
     ws_create_frame(&frame, out_data, out_len);
 }
 
 void ws_create_binary_frame(const uint8_t *data, size_t datalen, uint8_t *out_data, size_t *out_len)
 {
-    ws_frame frame = {.payload_length = datalen, .payload = (uint8_t *)data, .type = WS_BINARY_FRAME};
+    ws_frame_t frame = {.payload_length = datalen, .payload = (uint8_t *)data, .type = WS_BINARY_FRAME};
     ws_create_frame(&frame, out_data, out_len);
 }
 
 void ws_create_control_frame(wsFrameType type, const uint8_t *data, size_t data_len, uint8_t *out_data, size_t *out_len)
 {
-    ws_frame frame = {.payload_length = data_len, .payload = (uint8_t *)data, .type = type};
+    ws_frame_t frame = {.payload_length = data_len, .payload = (uint8_t *)data, .type = type};
     ws_create_frame(&frame, out_data, out_len);
 }

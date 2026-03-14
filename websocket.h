@@ -64,11 +64,11 @@ typedef struct
     uint8_t *payload;
     size_t payload_length;
     wsFrameType type;
-} ws_frame;
+} ws_frame_t;
 
 /* WebSocket Functions */
-void ws_parse_frame(ws_frame *frame, uint8_t *data, size_t len);
-void ws_create_frame(ws_frame *frame, uint8_t *out_data, size_t *out_len);
+void ws_parse_frame(ws_frame_t *frame, uint8_t *data, size_t len);
+void ws_create_frame(ws_frame_t *frame, uint8_t *out_data, size_t *out_len);
 void ws_create_closing_frame(uint8_t *out_data, size_t *out_len);
 void ws_create_text_frame(const char *text, uint8_t *out_data, size_t *out_len);
 void ws_create_binary_frame(const uint8_t *data, size_t datalen, uint8_t *out_data, size_t *out_len);

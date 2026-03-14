@@ -1,3 +1,13 @@
+/* wsserver.h - websocket lib
+ *
+ * Copyright (C) 2026 Athanasios Papadopoulos
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 2 of the License, or (at
+ * your option) any later version.
+ *
+ */
 #ifndef __WSSERVER_H
 #define __WSSERVER_H
 
@@ -23,7 +33,7 @@ typedef struct ws_client ws_client_t;
 */
 
 typedef void (*ws_server_connect_handler_t)(ws_server_t *server, ws_client_t *client, void *user_data);
-typedef void (*ws_server_message_handler_t)(ws_server_t *server, ws_client_t *client, const ws_frame *frame, void *user_data);
+typedef void (*ws_server_message_handler_t)(ws_server_t *server, ws_client_t *client, const ws_frame_t *frame, void *user_data);
 typedef void (*ws_server_disconnect_handler_t)(ws_server_t *server, ws_client_t *client, const char *reason, void *user_data);
 typedef void (*ws_server_handshake_fail_handler_t)(ws_server_t *server, ws_client_t *client, const char *reason, void *user_data);
 typedef void (*ws_server_error_handler_t)(ws_server_t *server, const char *where, int error_code, void *user_data);

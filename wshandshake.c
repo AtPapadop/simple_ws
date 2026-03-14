@@ -22,7 +22,7 @@
 #endif
 
 /* Reads a line from the HTTP request buffer */
-static int http_header_readline(char *in, char *buf, size_t len)
+static int http_header_t_readline(char *in, char *buf, size_t len)
 {
     char *ptr = buf;
     char *ptr_end = buf + len - 1;
@@ -46,7 +46,7 @@ static int http_header_readline(char *in, char *buf, size_t len)
 }
 
 /* Parses individual HTTP headers */
-static int http_parse_headers(http_header *header, char *hdr_line)
+static int http_parse_headers(http_header_t *header, char *hdr_line)
 {
     char *p = strchr(hdr_line, ':');
     if (!p)
@@ -78,7 +78,7 @@ static int http_parse_headers(http_header *header, char *hdr_line)
 }
 
 /* Parses the first request line (GET /path HTTP/1.1) */
-static int http_parse_request_line(http_header *header, char *hdr_line)
+static int http_parse_request_line(http_header_t *header, char *hdr_line)
 {
     char *token = strtok(hdr_line, " ");
     if (token)
@@ -92,7 +92,7 @@ static int http_parse_request_line(http_header *header, char *hdr_line)
 }
 
 /* Parses the entire WebSocket handshake request */
-static void ws_http_parse_handshake_header(http_header *header, uint8_t *in_buf, size_t in_len)
+static void ws_http_parse_handshake_header(http_header_t *header, uint8_t *in_buf, size_t in_len)
 {
     char header_line[256];
     int res;
@@ -105,7 +105,7 @@ static void ws_http_parse_handshake_header(http_header *header, uint8_t *in_buf,
     {
         size_t read_limit = (in_len < sizeof(header_line) - 1) ? in_len : (sizeof(header_line) - 1);
 
-        res = http_header_readline((char *)in_buf, header_line, read_limit);
+        res = http_header_t_readline((char *)in_buf, header_line, read_limit);
         if (res <= 0)
             break;
 
@@ -159,7 +159,7 @@ int ws_make_accept_key(const char *key, char *out_key, size_t *out_len)
 }
 
 /* Generates the WebSocket handshake response */
-static void ws_get_handshake_header(http_header *header, uint8_t *out_buff, size_t *out_len)
+static void ws_get_handshake_header(http_header_t *header, uint8_t *out_buff, size_t *out_len)
 {
     int written = 0;
     char new_key[64] = {0};
@@ -191,7 +191,7 @@ static void ws_get_handshake_header(http_header *header, uint8_t *out_buff, size
 }
 
 /* Handles the WebSocket handshake */
-int ws_handshake(http_header *header, uint8_t *in_buf, size_t in_len, size_t *out_len)
+int ws_handshake(http_header_t *header, uint8_t *in_buf, size_t in_len, size_t *out_len)
 {
     ws_http_parse_handshake_header(header, in_buf, in_len);
     ws_get_handshake_header(header, in_buf, out_len);
