@@ -173,7 +173,7 @@ int ws_server_run(ws_server_t *server); /* Blocking call, current thread */
  * @param server Server instance to start.
  * @return 0 on success, non-zero on failure.
  */
-int ws_server_start(ws_server_t *server); /* spawns internal thread */
+int ws_server_start(ws_server_t *server);
 
 /**
  * @brief Request server shutdown.

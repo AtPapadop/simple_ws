@@ -139,7 +139,6 @@ static void ws_http_parse_handshake_header(http_header_t *header, uint8_t *in_bu
 	}
 }
 
-/* Generates the WebSocket accept key */
 int ws_make_accept_key(const char *key, char *out_key, size_t *out_len)
 {
 	uint8_t sha[SHA1HashSize];
@@ -190,7 +189,6 @@ static void ws_get_handshake_header(http_header_t *header, uint8_t *out_buff, si
 	*out_len = written;
 }
 
-/* Handles the WebSocket handshake */
 int ws_handshake(http_header_t *header, uint8_t *in_buf, size_t in_len, size_t *out_len)
 {
 	ws_http_parse_handshake_header(header, in_buf, in_len);
@@ -198,7 +196,6 @@ int ws_handshake(http_header_t *header, uint8_t *in_buf, size_t in_len, size_t *
 	return 0;
 }
 
-/* Generates the WebSocket handshake header for a client */
 int ws_make_handshake(uint8_t *out_buff, size_t *out_len, const char *host, const char *key)
 {
 	int written = 0;
