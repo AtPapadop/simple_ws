@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(SIMPLE_WS_VERSION 0.1.0)
+set(SIMPLE_WS_VERSION 0.2.0)
 project(simple_ws VERSION ${SIMPLE_WS_VERSION} LANGUAGES C)
 
 include(GNUInstallDirs)
@@ -17,6 +17,7 @@ set(SIMPLE_WS_SOURCES
   src/base64.c
   src/wshandshake.c
   src/websocket.c
+  src/wsclient.c
   src/wsserver.c
 )
 

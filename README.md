@@ -1,13 +1,15 @@
 # simple_ws
 
-A lightweight C WebSocket server library with a small API for building event-driven WebSocket services.
+A lightweight C WebSocket library with a small API for building event-driven WebSocket services and clients.
 
 The project provides:
 - WebSocket handshake parsing and response generation
 - WebSocket frame parsing and frame construction
 - A multi-client server with callbacks for connect/message/disconnect/error
+- A remote client API for connect/send/receive against WebSocket servers
 - Helper modules for SHA-1 and Base64 used by the WebSocket protocol
 - An echo server example
+- A terminal-driven client example
 
 ## Project layout
 
@@ -15,10 +17,12 @@ The project provides:
 - `include/simple_ws/wsserver.h`: high-level server API
 - `include/simple_ws/websocket.h`: frame encode/decode API
 - `include/simple_ws/wshandshake.h`: HTTP/WebSocket handshake helpers
+- `include/simple_ws/wsclient.h`: high-level remote client API
 - `include/simple_ws/sha1.h`: SHA-1 helpers
 - `include/simple_ws/base64.h`: Base64 helpers
 - `src/`: implementation
 - `examples/echoserver.c`: runnable example server
+- `examples/wsclient_terminal.c`: runnable terminal client
 
 ## Requirements
 
@@ -128,6 +132,18 @@ Or include only the specific module headers you need.
 - `ws_client_ip(client, buffer, len)`
 - `ws_client_port(client)`
 
+### Remote client API
+
+- `ws_remote_client_create()`
+- `ws_remote_client_connect(client, host, port, path, origin, timeout_ms)`
+- `ws_remote_client_send_text(client, text)`
+- `ws_remote_client_send_frame(client, type, fin, payload, payload_len)`
+- `ws_remote_client_receive_frame(client, &frame, &frame_buf, &frame_buf_len, timeout_ms)`
+- `ws_remote_client_send_ping(client, payload, payload_len)`
+- `ws_remote_client_send_close(client, code, reason)`
+- `ws_remote_client_disconnect(client)`
+- `ws_remote_client_destroy(client)`
+
 ### Low-level protocol helpers
 
 - Handshake:
@@ -182,7 +198,7 @@ Important callback note:
 - Frame payload memory provided in message callbacks is owned by the server and only valid during that callback.
 - Copy payload data if you need to keep it after the callback returns.
 
-## Build and run the example
+## Build and run examples
 
 The repository includes [examples/echoserver.c](examples/echoserver.c), which:
 - accepts WebSocket clients
@@ -210,6 +226,30 @@ Connect with a WebSocket client to:
 ```text
 ws://127.0.0.1:8888
 ```
+
+The repository also includes [examples/wsclient_terminal.c](examples/wsclient_terminal.c), which:
+- connects to a remote WebSocket server
+- reads lines from terminal input and sends them as text frames
+- prints incoming frames (text/binary/ping/pong/continuation/close)
+
+### Build terminal client example
+
+```bash
+gcc -std=c99 -Iinclude examples/wsclient_terminal.c -Lbuild -lsimple_ws -lpthread -o wsclient_terminal
+```
+
+### Run terminal client example
+
+```bash
+./wsclient_terminal 127.0.0.1 8888 /
+```
+
+If the echo server example is running locally, each typed line is sent as a text frame and echoed back.
+
+Terminal client commands:
+- `/ping`: send ping frame
+- `/close`: send close frame and exit
+- `/quit`: send close frame and exit
 
 ## CMake integration in another project
 

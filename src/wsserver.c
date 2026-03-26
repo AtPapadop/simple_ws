@@ -276,7 +276,10 @@ static void ws_server_set_running(ws_server_t *server, bool running)
   server->running = running;
   pthread_mutex_unlock(&server->lock);
 
-  (void)write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t));
+  if (write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t)) < 0)
+  {
+    perror("ws_server_set_running: write");
+  }
 }
 
 static void ws_server_wake(ws_server_t *server)
@@ -284,7 +287,10 @@ static void ws_server_wake(ws_server_t *server)
   if (!server || server->wake_fd < 0)
     return;
 
-  (void)write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t));
+  if (write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t)) < 0)
+  {
+    perror("ws_server_wake: write");
+  }
 }
 
 static int ws_server_mod_client_events(ws_server_t *server, ws_client_t *client, uint32_t events)
@@ -700,6 +706,32 @@ static int ws_client_append_fragment(ws_server_t *server, ws_client_t *client, c
   return 0;
 }
 
+static const char *ws_close_reason_from_frame(const ws_frame_t *frame, char *out_reason, size_t out_reason_len)
+{
+  if (!out_reason || out_reason_len == 0)
+    return "Closed by Client";
+
+  out_reason[0] = '\0';
+  if (!frame || frame->payload_length < 2 || !frame->payload)
+    return "Closed by Client";
+
+  uint16_t code = ((uint16_t)frame->payload[0] << 8) | (uint16_t)frame->payload[1];
+  size_t reason_len = frame->payload_length - 2;
+
+  if (reason_len == 0)
+  {
+    snprintf(out_reason, out_reason_len, "Closed by Client (code %u)", (unsigned int)code);
+    return out_reason;
+  }
+
+  if (reason_len >= out_reason_len)
+    reason_len = out_reason_len - 1;
+
+  memcpy(out_reason, frame->payload + 2, reason_len);
+  out_reason[reason_len] = '\0';
+  return out_reason;
+}
+
 static void ws_server_handle_frames(ws_server_t *server, ws_client_t *client)
 {
   while (client->in_len > 0)
@@ -791,9 +823,13 @@ static void ws_server_handle_frames(ws_server_t *server, ws_client_t *client)
       (void)ws_server_send_immediate_frame(client, WS_PONG_FRAME, frame.payload, frame.payload_length);
       break;
     case WS_CLOSING_FRAME:
+    {
+      char close_reason[128];
+      const char *reason = ws_close_reason_from_frame(&frame, close_reason, sizeof(close_reason));
       (void)ws_server_send_immediate_frame(client, WS_CLOSING_FRAME, frame.payload, frame.payload_length);
-      ws_server_close_client_now(server, client, "Closed by Client");
+      ws_server_close_client_now(server, client, reason);
       return;
+    }
     default:
       ws_server_close_client_now(server, client, "Unsupported Frame Type");
       return;

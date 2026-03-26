@@ -22,6 +22,7 @@ extern "C"
 #include "sha1.h"
 #include "wshandshake.h"
 #include "websocket.h"
+#include "wsclient.h"
 #include "wsserver.h"
 
 #ifdef __cplusplus
