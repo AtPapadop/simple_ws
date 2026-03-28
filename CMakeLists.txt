@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(SIMPLE_WS_VERSION 0.2.0)
+set(SIMPLE_WS_VERSION 0.2.1)
 project(simple_ws VERSION ${SIMPLE_WS_VERSION} LANGUAGES C)
 
 include(GNUInstallDirs)

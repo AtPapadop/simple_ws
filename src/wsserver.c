@@ -42,6 +42,7 @@
 #define WS_SERVER_DEFAULT_BUF_SIZE 4096
 #define WS_SERVER_DEFAULT_MAX_EVENTS 64
 #define WS_SERVER_SHUTDOWN_TIMEOUT_MS 2000
+#define WS_CLIENT_INDEX_NONE (-1)
 
 #define WS_TAG_FD(fd_) ((((uint64_t)(uint32_t)(fd_)) << 1) | 0ULL)
 #define WS_TAG_PTR(ptr_) ((((uint64_t)(uintptr_t)(ptr_)) << 1) | 1ULL)
@@ -51,10 +52,16 @@
 
 struct ws_client
 {
+  int index;
   int fd;
   bool active;
   bool handshake_done;
   bool close_requested;
+  bool in_active_list;
+
+  int next_active;
+  int prev_active;
+  int next_free;
 
   struct sockaddr_storage addr;
   socklen_t addr_len;
@@ -104,6 +111,9 @@ struct ws_server
   pthread_mutex_t lock;
 
   ws_client_t *clients;
+  int active_head;
+  int free_head;
+  size_t active_count;
   void *user_data;
 
   ws_server_connect_handler_t on_connect;
@@ -138,6 +148,10 @@ static void ws_client_zero(ws_client_t *client)
   client->active = false;
   client->handshake_done = false;
   client->close_requested = false;
+  client->in_active_list = false;
+  client->next_active = WS_CLIENT_INDEX_NONE;
+  client->prev_active = WS_CLIENT_INDEX_NONE;
+  client->next_free = WS_CLIENT_INDEX_NONE;
 
   memset(&client->addr, 0, sizeof(client->addr));
   client->addr_len = 0;
@@ -171,6 +185,9 @@ static void ws_client_reset_runtime(ws_client_t *client)
   client->active = false;
   client->handshake_done = false;
   client->close_requested = false;
+  client->in_active_list = false;
+  client->next_active = WS_CLIENT_INDEX_NONE;
+  client->prev_active = WS_CLIENT_INDEX_NONE;
 
   memset(&client->addr, 0, sizeof(client->addr));
   client->addr_len = 0;
@@ -184,6 +201,63 @@ static void ws_client_reset_runtime(ws_client_t *client)
   client->frag_len = 0;
   client->user_data = NULL;
   client->close_reason[0] = '\0';
+}
+
+static void ws_server_client_attach_active_locked(ws_server_t *server, ws_client_t *client)
+{
+  if (!server || !client || client->in_active_list)
+    return;
+
+  client->prev_active = WS_CLIENT_INDEX_NONE;
+  client->next_active = server->active_head;
+
+  if (server->active_head != WS_CLIENT_INDEX_NONE)
+    server->clients[server->active_head].prev_active = client->index;
+
+  server->active_head = client->index;
+  client->in_active_list = true;
+  server->active_count++;
+}
+
+static void ws_server_client_detach_active_locked(ws_server_t *server, ws_client_t *client)
+{
+  if (!server || !client || !client->in_active_list)
+    return;
+
+  if (client->prev_active != WS_CLIENT_INDEX_NONE)
+    server->clients[client->prev_active].next_active = client->next_active;
+  else
+    server->active_head = client->next_active;
+
+  if (client->next_active != WS_CLIENT_INDEX_NONE)
+    server->clients[client->next_active].prev_active = client->prev_active;
+
+  client->prev_active = WS_CLIENT_INDEX_NONE;
+  client->next_active = WS_CLIENT_INDEX_NONE;
+  client->in_active_list = false;
+  if (server->active_count > 0)
+    server->active_count--;
+}
+
+static ws_client_t *ws_server_client_alloc_slot_locked(ws_server_t *server)
+{
+  if (!server || server->free_head == WS_CLIENT_INDEX_NONE)
+    return NULL;
+
+  int idx = server->free_head;
+  ws_client_t *client = &server->clients[idx];
+  server->free_head = client->next_free;
+  client->next_free = WS_CLIENT_INDEX_NONE;
+  return client;
+}
+
+static void ws_server_client_release_slot_locked(ws_server_t *server, ws_client_t *client)
+{
+  if (!server || !client)
+    return;
+
+  client->next_free = server->free_head;
+  server->free_head = client->index;
 }
 
 static void ws_client_free_buffers(ws_client_t *client)
@@ -220,9 +294,11 @@ static int ws_ensure_capacity(uint8_t **buf, size_t *cap, size_t needed, size_t 
     new_cap = WS_SERVER_DEFAULT_BUF_SIZE;
 
   while (new_cap < needed)
+  {
     if (new_cap > SIZE_MAX / 2)
       return -1;
-  new_cap *= 2;
+    new_cap *= 2;
+  }
 
   uint8_t *tmp = realloc(*buf, new_cap);
   if (!tmp)
@@ -269,12 +345,15 @@ static bool ws_server_is_running(ws_server_t *server)
 
 static void ws_server_set_running(ws_server_t *server, bool running)
 {
-  if (!server || server->wake_fd < 0)
+  if (!server)
     return;
 
   pthread_mutex_lock(&server->lock);
   server->running = running;
   pthread_mutex_unlock(&server->lock);
+
+  if (server->wake_fd < 0)
+    return;
 
   if (write(server->wake_fd, &(uint64_t){1}, sizeof(uint64_t)) < 0)
   {
@@ -483,10 +562,12 @@ static void ws_server_close_client_now(ws_server_t *server, ws_client_t *client,
 
   fd = client->fd;
   had_handshake = client->handshake_done;
+  ws_server_client_detach_active_locked(server, client);
   client->active = false;
   client->handshake_done = false;
   client->close_requested = false;
   client->fd = -1;
+  ws_server_client_release_slot_locked(server, client);
   pthread_mutex_unlock(&server->lock);
 
   if (fd >= 0)
@@ -532,6 +613,7 @@ static int ws_server_prepare_client(ws_server_t *server, ws_client_t *client, in
   if (ws_ensure_capacity(&client->out_buf, &client->out_cap, server->initial_buffer_size, server->initial_buffer_size) != 0)
     return -1;
 
+  pthread_mutex_lock(&server->lock);
   client->fd = fd;
   client->active = true;
   client->handshake_done = false;
@@ -542,6 +624,9 @@ static int ws_server_prepare_client(ws_server_t *server, ws_client_t *client, in
     memcpy(&client->addr, addr, addr_len);
     client->addr_len = addr_len;
   }
+
+  ws_server_client_attach_active_locked(server, client);
+  pthread_mutex_unlock(&server->lock);
 
   return 0;
 }
@@ -569,17 +654,8 @@ static void ws_server_accept_new(ws_server_t *server)
       continue;
     }
 
-    ws_client_t *slot = NULL;
-
     pthread_mutex_lock(&server->lock);
-    for (int i = 0; i < server->max_clients; i++)
-    {
-      if (!server->clients[i].active && server->clients[i].fd == -1)
-      {
-        slot = &server->clients[i];
-        break;
-      }
-    }
+    ws_client_t *slot = ws_server_client_alloc_slot_locked(server);
     pthread_mutex_unlock(&server->lock);
 
     if (!slot)
@@ -592,6 +668,9 @@ static void ws_server_accept_new(ws_server_t *server)
     if (ws_server_prepare_client(server, slot, client_fd, (struct sockaddr *)&addr, addr_len) != 0)
     {
       ws_server_report_error(server, "prepare_client", errno);
+      pthread_mutex_lock(&server->lock);
+      ws_server_client_release_slot_locked(server, slot);
+      pthread_mutex_unlock(&server->lock);
       close(client_fd);
       continue;
     }
@@ -604,6 +683,10 @@ static void ws_server_accept_new(ws_server_t *server)
     {
       ws_server_report_error(server, "epoll_ctl(ADD client)", errno);
       ws_client_free_buffers(slot);
+      pthread_mutex_lock(&server->lock);
+      ws_server_client_detach_active_locked(server, slot);
+      ws_server_client_release_slot_locked(server, slot);
+      pthread_mutex_unlock(&server->lock);
       ws_client_reset_runtime(slot);
       close(client_fd);
     }
@@ -915,7 +998,7 @@ static void ws_server_handle_client_write(ws_server_t *server, ws_client_t *clie
       return;
     }
 
-    size_t n = send(client->fd, client->out_buf + client->out_sent, client->out_len - client->out_sent, MSG_NOSIGNAL);
+    ssize_t n = send(client->fd, client->out_buf + client->out_sent, client->out_len - client->out_sent, MSG_NOSIGNAL);
     if (n < 0)
     {
       if (errno == EAGAIN || errno == EWOULDBLOCK)
@@ -1074,11 +1157,19 @@ static void ws_server_close_all(ws_server_t *server, const char *reason)
   if (!server)
     return;
 
-  for (int i = 0; i < server->max_clients; i++)
+  while (true)
   {
-    if (server->clients[i].active && server->clients[i].handshake_done)
-      (void)ws_server_send_immediate_frame(&server->clients[i], WS_CLOSING_FRAME, NULL, 0);
-    ws_server_close_client_now(server, &server->clients[i], reason ? reason : "Server Shutdown");
+    pthread_mutex_lock(&server->lock);
+    int idx = server->active_head;
+    pthread_mutex_unlock(&server->lock);
+
+    if (idx == WS_CLIENT_INDEX_NONE)
+      break;
+
+    ws_client_t *client = &server->clients[idx];
+    if (client->active && client->handshake_done)
+      (void)ws_server_send_immediate_frame(client, WS_CLOSING_FRAME, NULL, 0);
+    ws_server_close_client_now(server, client, reason ? reason : "Server Shutdown");
   }
 }
 
@@ -1113,6 +1204,9 @@ ws_server_t *ws_server_create(uint16_t port, int max_clients)
   server->started_as_thread = false;
   server->thread_joinable = false;
   server->running = false;
+  server->active_head = WS_CLIENT_INDEX_NONE;
+  server->free_head = 0;
+  server->active_count = 0;
 
   snprintf(server->bind_addr, sizeof(server->bind_addr), "%s", WS_SERVER_DEFAULT_BIND_ADDR);
 
@@ -1131,7 +1225,11 @@ ws_server_t *ws_server_create(uint16_t port, int max_clients)
   }
 
   for (int i = 0; i < max_clients; i++)
+  {
     ws_client_zero(&server->clients[i]);
+    server->clients[i].index = i;
+    server->clients[i].next_free = (i + 1 < max_clients) ? (i + 1) : WS_CLIENT_INDEX_NONE;
+  }
 
   return server;
 }
@@ -1528,11 +1626,12 @@ int ws_server_broadcast_frame(ws_server_t *server, wsFrameType type, const uint8
 
   int sent = 0;
   pthread_mutex_lock(&server->lock);
-  for (int i = 0; i < server->max_clients; i++)
+  for (int i = server->active_head; i != WS_CLIENT_INDEX_NONE; i = server->clients[i].next_active)
   {
-    if (server->clients[i].active && server->clients[i].handshake_done)
+    ws_client_t *client = &server->clients[i];
+    if (client->active && client->handshake_done)
     {
-      if (ws_server_queue_frame_locked(server, &server->clients[i], type, payload, payload_len) == 0)
+      if (ws_server_queue_frame_locked(server, client, type, payload, payload_len) == 0)
         sent++;
     }
   }
@@ -1645,7 +1744,7 @@ size_t ws_server_client_count(ws_server_t *server)
 
   size_t count = 0;
   pthread_mutex_lock(&server->lock);
-  for (int i = 0; i < server->max_clients; i++)
+  for (int i = server->active_head; i != WS_CLIENT_INDEX_NONE; i = server->clients[i].next_active)
   {
     if (server->clients[i].active && server->clients[i].handshake_done)
       count++;
